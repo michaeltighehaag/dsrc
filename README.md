@@ -1,2 +1,3 @@
 # dsrc
-Experimental language for distributed, scalable, and robust computing.
+Prototype of experimental language for distributed, scalable, and robust computing.
+
