@@ -1,6 +1,6 @@
 #lang racket
 [require racket/require
-  [path-up "Projects/source-libs/utils-base.rkt"]]
+  [path-up "dsrc/utils-base.rkt"]]
 
 [provide [all-defined-out]]
 
