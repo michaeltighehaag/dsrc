@@ -5,8 +5,7 @@
   [path-up "dsrc/utils-dsrc.rkt"]]
 [require racket/require
   [path-up "dsrc/utils-date.rkt"]]
-[require racket/require
-  [path-up "dsrc/utils-ndef.rkt"]]
+
 
 
 
