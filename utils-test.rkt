@@ -1,12 +1,12 @@
 #lang racket
 [require racket/require
-  [path-up "Projects/source-libs/utils-base.rkt"]]
+  [path-up "dsrc/utils-base.rkt"]]
 [require racket/require
-  [path-up "Projects/source-libs/utils-dsrc.rkt"]]
+  [path-up "dsrc/utils-dsrc.rkt"]]
 [require racket/require
-  [path-up "Projects/source-libs/utils-date.rkt"]]
+  [path-up "dsrc/utils-date.rkt"]]
 [require racket/require
-  [path-up "Projects/source-libs/utils-ndef.rkt"]]
+  [path-up "dsrc/utils-ndef.rkt"]]
 
 
 
