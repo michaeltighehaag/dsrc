@@ -1,359 +1,331 @@
+#! /usr/bin/racket
 #lang racket
 [require racket/require
   [path-up "dsrc/utils-base.rkt"]]
+[require bitsyntax]
+[require racket/performance-hint]
 
 [provide [all-defined-out]]
 
-[require file/tar]
-[provide [all-from-out file/tar]]
-[require file/untgz]
-[provide [all-from-out file/untgz]]
-[require sxml]
-[provide [all-from-out sxml]]
-[require html-parsing]
-[provide [all-from-out html-parsing]]
-;[require math/number-theory]
-;[provide [all-from-out math/number-theory]]
+[define [int->bv v s] [integer->bit-string v s #t]]
+[define [char-str->bv s]
+  [let [[sl [string-length s]]]
+    [int->bv [if [equal? sl 0] 0 [string->number s 2]] sl]]]
+[define-inline [bv->char-str bs] 
+  [let [[bsl [bit-string-length bs]]]
+    [if [equal? bsl 0] "" [pad [bit-string->unsigned-integer bs #t] bsl 2]]]]
 
-[require http/request]
-[require json-parsing]
-;[require http]
-;[require net/uri-codec]
-;[require file/md5]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-[require [rename-in srfi/41
-    [list->stream strm<-list]
-    [port->stream strm<-port]
-    [stream->list list<-strm]
-    [stream-null strm-null]
-    [stream-cons strm-cons]
-    [stream? strm?]
-    [stream-null? strm-null?]
-    [stream-pair? strm-pair?]
-    [stream-car strm-car]
-    [stream-cdr strm-cdr]
-    [stream-lambda strm-lambda]
-    [define-stream define-strm]
-    [stream-append strm-append]
-    [stream-concat strm-concat]
-    [stream-constant strm-constant]
-    [stream-drop strm-drop]
-    [stream-drop-while strm-drop-while]
-    [stream-filter strm-filter]
-    [stream-fold strm-fold]
-    [stream-for-each strm-for-each]
-    [stream-from strm-from]
-    [stream-iterate strm-iterate]
-    [stream-length strm-length]
-    [stream-let strm-let]
-    [stream-map strm-map]
-    [stream-of strm-of]
-    [stream-range strm-range]
-    [stream-ref strm-ref]
-    [stream-reverse strm-reverse]
-    [stream-scan strm-scan]
-    [stream-take strm-take]
-    [stream-take-while strm-take-while]
-    [stream-unfold strm-unfold]
-    [stream-unfolds strm-unfolds]
-    [stream-zip strm-zip]
-]]
-[provide [all-from-out srfi/41]]
+[struct fbrt [bits count aux val left right] #:transparent]
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+[define [rffd bs1 s1 bs2 s2]
+  [if [and [< s1 [bit-string-length bs1]] [< s2 [bit-string-length bs2]]]
+    [if [equal? [bit-string-ref bs1 s1] [bit-string-ref bs2 s2]]
+      [add1 [rffd bs1 [add1 s1] bs2 [add1 s2]]]
+      0 ] 0]]
 
-;*******************************************************************************************
-;xml 
-[define [get-xml str [nsl [list]]] 
-  [call-with-input-file str [lambda [in] [ssax:xml->sxml in nsl]]]]
+[define [suvf n o] n ]
+[define [snf af hb v] 
+  [fbrt hb 1 [af hb v null null] v null null]] ;;add/use uf??
 
-[define [get-json-sxml str] 
-  [call-with-input-file str [lambda [in] [json->sxml in ]]]]
+[define [fbrt-insert v k t af uf nf]
+  [let [[kl [bit-string-length k]]]
+    [if [null? t]
+      [fbrt k 1 [af k v null null] [uf v null] null null] ;;v
+      [car [fbrt-rec-insert af uf nf v k kl 0 t [list t]]]]]]
+[define [fbrt-rec-insert af uf nf v k kl hbi h np]
+  [let [[hb [fbrt-bits h]][hl [fbrt-left h]][hr [fbrt-right h]]]                  
+  [let [[nki [+ hbi [rffd k hbi hb 0]]][hei [+ hbi [bit-string-length hb]]]] 
+    [if [< nki hei]
+      [let [[oh [fbrt [sub-bit-string hb [- nki hbi] [- hei hbi]] [fbrt-count h] [fbrt-aux h] [fbrt-val h] hl hr]]
+            [nbp [sub-bit-string k hbi nki]]]
+        [if [< nki kl]
+          [let* [[nhb [sub-bit-string k nki kl]][nh [nf af nhb v]]]
+            [if [equal? 0 [bit-string-ref k nki]]
+                  [rec-update [fbrt nbp [add1 [fbrt-count h]] [af nbp null nh oh] null nh oh][cdr np]af nh null]  
+                  [rec-update [fbrt nbp [add1 [fbrt-count h]] [af nbp null oh nh] null oh nh][cdr np]af nh null]] ] 
+          [if [equal? 0 [bit-string-ref hb [- nki hbi]]]
+            [rec-update [fbrt nbp [add1 [fbrt-count h]] [af nbp v oh null] [uf v null] oh null][cdr np]af null null] ;;v
+            [rec-update [fbrt nbp [add1 [fbrt-count h]] [af nbp v null oh] [uf v null] null oh][cdr np]af null null]]]] ;;v
+      [let [[hv [fbrt-val h]]]
+        [if [< nki kl]
+          [let* [[nhb [sub-bit-string k nki kl]] [nh [nf af nhb v]]]
+            [if [equal? [bit-string-ref k hei] 0]
+              [if [equal? hl null]
+                [rec-update [fbrt hb [+ 1 [fbrt-count h]] [af hb hv nh hr] hv nh hr] [cdr np] af nh null]
+                [fbrt-rec-insert af uf nf v k kl hei hl [cons hl np]]]
+              [if [equal? hr null]
+                [rec-update [fbrt hb [+ 1 [fbrt-count h]] [af hb hv hl nh] hv hl nh] [cdr np] af nh null]
+                [fbrt-rec-insert af uf nf v k kl hei hr [cons hr np]]]]]
+            [let [[nn [fbrt hb [+ 1 [if [null? hl] 0 [fbrt-count hl]] [if [null? hr] 0 [fbrt-count hr]]] [af hb v hl hr] [uf v hv] hl hr]]];[nf af uf hb v hv hl hr]]]
+              [rec-update nn [cdr np] af [cons nn null] hv]]
+        ]]]]]]
 
-[define [get-json-sjson str] 
-  [call-with-input-file str [lambda [in] [json->sjson in ]]]]
+[define [rec-update up-n np af p ov]
+  [if [null? np] [list up-n [cons up-n p] ov]
+    [let* [[h [car np]]
+           [psum [+ [fbrt-count up-n] [if [null? [fbrt-val h]] 0 1]]]]
+      [rec-update 
+        [if [equal? [bit-string-ref [fbrt-bits up-n] 0] 0]
+          [fbrt [fbrt-bits h]
+                [+ psum [if [null? [fbrt-right h]] 0 [fbrt-count [fbrt-right h]]]]
+                [af [fbrt-bits h] [fbrt-val h] up-n [fbrt-right h]] [fbrt-val h] up-n [fbrt-right h]] 
+          [fbrt [fbrt-bits h]
+                [+ psum [if [null? [fbrt-left h]] 0 [fbrt-count [fbrt-left h]]]]
+                [af [fbrt-bits h] [fbrt-val h] [fbrt-left h] up-n] [fbrt-val h] [fbrt-left h] up-n]]  
+        [cdr np] af [cons up-n p] ov]]]]
 
-[define [str->file str fstr]
-  [call-with-output-file fstr
-    [lambda [out]
-      [display str out]] #:exists 'replace]]
+[define [fbrt-get-path k t]
+  [fbrt-rec-get-path k [bit-string-length k] 0 [fbrt-bits t] [fbrt-left t][fbrt-right t][list t][list 0]]]
+[define [fbrt-rec-get-path k kl hbi hb hl hr np inp]
+  [let [[nki [+ hbi [rffd k hbi hb 0]]] [hei [+ hbi [bit-string-length hb]]]] 
+    [if [< nki hei]
+      [if [< nki kl] null [values np inp]]
+      [if [< nki kl]
+        [if [equal? [bit-string-ref k hei] 0]
+          [if [equal? hl null] null [fbrt-rec-get-path k kl hei [fbrt-bits hl][fbrt-left hl][fbrt-right hl][cons hl np][cons [+ hei [bit-string-length [fbrt-bits hl]]] inp]]]
+          [if [equal? hr null] null [fbrt-rec-get-path k kl hei [fbrt-bits hr][fbrt-left hr][fbrt-right hr][cons hr np][cons [+ hei [bit-string-length [fbrt-bits hr]]] inp]]]]
+        [values np inp]]]]]
 
-[define [sxml->xml-file ns-list root attr-list body filename]
-  [srl:sxml->xml
-    [list '*TOP*
-      [list '*PI* 'xml "version=\"1.0\" encoding=\"UTF-8\""]
-      [list '@ [cons '*NAMESPACES* ns-list]]
-      [list root [cons '@ attr-list] body]]
-    filename]]
+[define [fbrt-get-val k t]
+  [let-values [[[np inp] [fbrt-get-path k t]]]
+    [if [null? np] null
+        [if [equal? [bit-string-length k] [car inp]] [fbrt-val [car np]] null]]]] 
 
-;*******************************************************************************************
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;********************************************************************************************
-;*** Streams ***
-;***************
+[define [fbrt-delete k t af]
+  [let-values [[[np inp] [fbrt-get-path k t]]]
+    [if [null? np] t
+      [let [[h [car np]]]
+        [if [and [null? [fbrt-left h]] [null? [fbrt-right h]]]
+           [if [null? [cdr np]]
+             null
+             [let [[n [cadr np]][nl [fbrt-left [cadr np]]][nr [fbrt-right [cadr np]]]]
+               [if [null? [fbrt-val n]]
+                 [if [equal? 0 [bit-string-ref [fbrt-bits h] 0]]
+                   [car [rec-update [fbrt [bit-string-append [fbrt-bits n][fbrt-bits nr]] [fbrt-count nr] [fbrt-aux nr] [fbrt-val nr] [fbrt-left nr][fbrt-right nr]] [cddr np] af null null]]
+                   [car [rec-update [fbrt [bit-string-append [fbrt-bits n][fbrt-bits nl]] [fbrt-count nl] [fbrt-aux nl] [fbrt-val nl] [fbrt-left nl][fbrt-right nl]] [cddr np] af null null]]]
+                 [if [equal? 0 [bit-string-ref [fbrt-bits h] 0]]
+                   [car [rec-update [fbrt [fbrt-bits n] [sub1 [fbrt-count n]] [af [fbrt-bits n] [fbrt-val h] null [fbrt-right h]] [fbrt-val h] null [fbrt-right n]] [cddr np] af null null]]
+                   [car [rec-update [fbrt [fbrt-bits n] [sub1 [fbrt-count n]] [af [fbrt-bits n] [fbrt-val h] [fbrt-left h] null] [fbrt-val h] [fbrt-left n] null] [cddr np] af null null]]]
+                 ]]]
+           [car [rec-update [fbrt  [fbrt-bits h] [sub1 [fbrt-count h]] [af [fbrt-bits h] null [fbrt-left h][fbrt-right h]] null [fbrt-left h][fbrt-right h]][cdr np]af null null]]
+        ]]]]];;needs testing
 
-[define [disp-strm x] [if [strm? x]
-  [begin [displayln "-"] [strm-for-each disp-strm x]]
-  [displayln x]]]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; iterate node vals in skew order (ie left, internal, right);;;;;;;;;;;
+[define [fbrt-skew-first t]
+  [if [null? t] null
+    [if [null? [fbrt-left t]] [list t] [fbrt-skew-rec-first [list t]]]]]
+[define [fbrt-skew-rec-first np]
+  [let [[hl [fbrt-left [car np]]]]
+    [if [null? hl] np [fbrt-skew-rec-first [cons hl np]]]]]
 
-;[define nats [strm-cons 0 [strm-map add1 nats]]]
-[define nats [strm-from 0]]
+[define-inline [fbrt-skew-last t]
+  [if [null? t] null
+    [if [null? [fbrt-right t]] [list t] [fbrt-skew-rec-last [list t]]]]]
+[define [fbrt-skew-rec-last np]
+  [let [[hr [fbrt-right [car np]]]]
+    [if [null? hr] np [fbrt-skew-rec-last [cons hr np]]]]]
 
-[define [strm-number-alike pred? strm]
-  [strm-unfold
-    [lambda [x] [cons [strm-car [car x]] [cdr x]]]
-    [lambda [x] [not [strm-null? [car x]]]]
-    [lambda [x] [if [strm-null? [strm-cdr [car x]]]
-                  [cons strm-null 0]
-                  [if [pred? [strm-car [car x]] [strm-car [strm-cdr [car x]]]]
-                    [cons [strm-cdr [car x]] [+ [cdr x] 1]]
-                    [cons [strm-cdr [car x]] 0]]]]
-    [cons strm 0]]]
+[define-inline [fbrt-skew-next np]
+  [let [[hr [fbrt-right [car np]]]]
+    [if [null? hr]
+      [if [null? [cdr np]] null [fbrt-skew-next-up [cdr np] [bit-string-ref [fbrt-bits [car np]] 0]]]
+      [fbrt-skew-rec-first [cons hr np]]]]]
+[define [fbrt-skew-next-up np b]
+  [if [null? np] null
+    [let [[h [car np]]]
+      [if [equal? b 0] np
+        [if [null? [cdr np]] null [fbrt-skew-next-up [cdr np] [bit-string-ref [fbrt-bits h] 0]]]]]]]
 
-[define-strm [strm-uncat pred? strm]
-  [if [strm-null? strm]
-    strm-null
-    [let-values [[[a b][strm-split-at pred? [strm-cdr strm]]]]
-      [strm-cons
-        [strm-cons [strm-car strm] a]
-        [strm-uncat pred? b]]]]]
+[define-inline [fbrt-skew-prev np]
+  [let [[hl [fbrt-left [car np]]]]
+    [if [null? hl]
+      [if [null? [cdr np]] null [fbrt-skew-prev-up [cdr np] [bit-string-ref [fbrt-bits [car np]] 0]]]
+      [fbrt-skew-rec-last [cons hl np]]]]]
+[define [fbrt-skew-prev-up np b]
+  [if [null? np] null
+    [let [[h [car np]]]
+      [if [equal? b 1] np
+        [if [null? [cdr np]] null [fbrt-skew-prev-up [cdr np] [bit-string-ref [fbrt-bits h] 0]]]]]]]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;iterate node vals in lexical string order (ie internal, left, right);;;;;;;;;
+[define [fbrt-lex-first t]
+  [if [null? t] null [list t]]]
 
-[define-strm [strm-chunk n strm]
-  [if [strm-null? strm]
-    strm-null
-    [strm-cons
-      [strm-take n strm]
-      [strm-chunk n [strm-drop n strm]]]]]
+[define [fbrt-lex-last t]
+  [if [null? t] null [fbrt-lex-rec-last [list t]]]]
+[define [fbrt-lex-rec-last np]
+  [let [[h [car np]]]
+    [if [null? [fbrt-right h]]
+      [if [null? [fbrt-left h]] np
+        [fbrt-lex-rec-last [cons [fbrt-left h] np]]]
+      [fbrt-lex-rec-last [cons [fbrt-right h] np]]]]]
 
-[define [strm-collate istrm]
-  [strm-unfolds
-    [lambda [s]
-      [if [strm-null? s]
-          [values s '[] '[]]
-        [if [strm-null? [strm-cdr s]]
-           [values [strm-cdr s] [list [strm-car s]] '[]]
-          [let [[a [strm-car s]]
-                [b [strm-car [strm-cdr s]]]
-                [d [strm-cdr [strm-cdr s]]]]
-              [values d [list a] [list b]]]]]]
-    istrm]]
-;[call-with-values  [lambda [] [strm-extraleave [stream 1 2 3 4 5]]] [lambda [x y] [begin [display-strm x] [display-strm y]]]]
+[define-inline [fbrt-lex-next np]
+  [let [[h [car np]]]
+    [if [null? [fbrt-left h]]
+      [if [null? [fbrt-right h]]
+        [if [null? [cdr np]] null [fbrt-lex-next-up [cdr np] [bit-string-ref [fbrt-bits h] 0]]]
+        [cons [fbrt-right h] np]]
+      [cons [fbrt-left h] np]]]]
+[define [fbrt-lex-next-up np b]
+  [if [null? np] null
+    [let [[h [car np]]]
+      [if [equal? b 0]
+        [if [null? [fbrt-right h]]
+          [if [null? [cdr np]] null [fbrt-lex-next-up [cdr np] [bit-string-ref [fbrt-bits h] 0]]]
+          [cons [fbrt-right h] np]]
+        [if [null? [cdr np]] null [fbrt-lex-next-up [cdr np] [bit-string-ref [fbrt-bits h] 0]]]]]]]
 
-[define [strm-uncollate s1 s2 ] [void]];add this
+[define-inline [fbrt-lex-prev np]
+  [if [null? [cdr np]] null
+    [fbrt-lex-prev-up [cdr np] [bit-string-ref [fbrt-bits [car np]] 0]]]]
+[define-inline [fbrt-lex-prev-up np b]
+  [let [[h [car np]]]
+    [if [equal? b 1]
+      [if [null? [fbrt-left h]] np
+        [fbrt-lex-rec-last [cons [fbrt-left h] np]]]
+        np]]]
 
-[define [strm-bi-partition pred? strm]
-  [strm-unfolds
-    [lambda [seed]
-      [if [strm-null? seed]
-          [values seed '[] '[]]
-          [let [[a [strm-car seed]]
-                [d [strm-cdr seed]]]
-            [if [pred? a]
-                [values d [list a] #f]
-                [values d #f [list a]]]]]]
-    strm]]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[define [trav iter-f n-path f acc]
+  [if [null? n-path] acc
+    [trav iter-f [iter-f n-path] f [f n-path acc]]]]
 
-[define [strm-split-at pred? strm]
-  [strm-unfolds
-    [lambda [sd]
-      [if [strm-null? [cdr sd]]
-          [values sd '[] '[]]
-          [let [[a [strm-car [cdr sd]]]
-                [d [strm-cdr [cdr sd]]]]
-            [if [or [car sd] [pred? a]]
-                [values [cons #t d] #f [list a]]
-                [values [cons #f d] [list a] #f]]]]]
-    [cons #f strm]]]
+[define [list-rlex t]
+  [trav fbrt-lex-next [fbrt-lex-first t] dump-vals [list]]]
+[define [list-lex t]
+  [trav fbrt-lex-prev [fbrt-lex-last t] dump-vals [list]]]
 
-[define-strm [strm-smerge lt? . strms]
-  [define-strm [merge xx yy]
-    [stream-match xx [[] yy] [[x . xs]
-      [stream-match yy [[] xx] [[y . ys]
-        [if [lt? y x]
-            [strm-cons y [merge xx ys]]
-            [strm-cons x [merge xs yy]]]]]]]]
-  [strm-let loop [[strms strms]]
-    [cond [[null? strms] strm-null]
-          [[null? [cdr strms]] [car strms]]
-          [else [merge [car strms]
-                       [apply strm-smerge lt?
-                         [cdr strms]]]]]]]
+[define [list-rskew t]
+  [trav fbrt-skew-next [fbrt-skew-first t] dump-vals [list]]]
+[define [list-skew t]
+  [trav fbrt-skew-prev [fbrt-skew-last t] dump-vals [list]]]
 
-[define [rec-strm-sort lt? s]
-  [if [strm-null? [strm-cdr s]] s
-    [rec-strm-sort lt?
-      [strm-map
-        [lambda [x] [if [strm-null? [strm-cdr x]]
-                      [strm-car x]
-                      [strm-smerge lt? [strm-car x] [strm-car [strm-cdr x]]]]]
-        [strm-chunk 2 s]]]]]
+[define [flist-skew t]
+  [trav fbrt-skew-prev [fbrt-skew-last t] dump-path-vals [list]]]
 
-[define [strm-sort lt? s] [strm-car [rec-strm-sort lt? [strm-map [lambda [x] [stream x]] s]]]]
+[define [dump-vals n a] [if [null? [fbrt-val [car n]]] a [cons [fbrt-val [car n]] a]]]
+[define-inline [dump-path-vals x a]
+  [if [null? [fbrt-val [car x]]] a
+    [cons [string-append [read-back get-bits x ""] ":"  [format "~a" [fbrt-val [car x]]] ] a]]]
 
-[define-strm [strm-unique eql? s]
-  [if [strm-null? s]
-      strm-null
-      [strm-cons [strm-car s]
-        [strm-unique eql?
-          [strm-drop-while
-            [lambda [x]
-              [eql? [strm-car s] x]]
-            s]]]]]
+[define [read-back f np str]
+  [if [null? np] str [read-back f [cdr np] [string-append [f [car np]] str]]]]
 
+[define-inline [get-bits n] [bv->char-str [fbrt-bits n]]]
+[define [get-brk n] [pad 1 [bit-string-length [fbrt-bits n]]]]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;Breadth first search functions;;;;;;;;;;;;;;;;;;;;;;;;;
 
-[define [rec-find-sm lt? x]
-  [let [[fstrm [car x] ][rstrm [cdr x]]]
-  [if [or [strm-null? fstrm] [strm-null? rstrm]]
-    [cons strm-null strm-null]
-    [if [lt? [strm-car rstrm] [strm-car fstrm]]
-      [rec-find-sm lt? [cons fstrm [strm-drop-while [lambda [x] [lt? x [strm-car fstrm]]] rstrm]]]
-      [if [lt? [strm-car fstrm] [strm-car rstrm]]
-        [rec-find-sm lt? [cons [strm-drop-while [lambda [x] [lt? x [strm-car rstrm]]] fstrm] rstrm]]
-        [cons fstrm rstrm]]]]]]
+[define [fbrt-bfs f ns testv a]
+  [fbrt-rec-bfs f [list ns] [list] testv a]]
 
-[define [strm-intersect lt? fstrm rstrm]
-  [strm-unfold 
-     [lambda [x] [cons [strm-car [cdr x]] [strm-car [car x]]]] 
-     [lambda [x] [and [not [strm-null? [car x]]][not [strm-null? [cdr x]]]]]
-     [lambda [x] [rec-find-sm lt? [cons [strm-cdr [car x]] [cdr x]]]]
-     [rec-find-sm lt? [cons rstrm fstrm]]
-   ]]
+[define [fbrt-rec-bfs f wl rl testv a]
+  [if [null? wl]
+    [if [null? rl] #f 
+      [begin [displayln "end."][fbrt-rec-bfs f [reverse rl] [list] testv a]]]
+    [let* [[h [car wl]]
+          [r [f h a]]]
+      [if [equal? [testv r] #t] r
+        [fbrt-rec-bfs f [cdr wl] [cons-c h rl] testv r]]]]]
 
-[define [strm-diff] [void]];add this
+[define-inline [cons-c h ls]
+  [let [[l [fbrt-left h]]
+        [r [fbrt-right h]]]
+    [if [and [null? l][null? r]] ls
+      [if [null? l]
+        [cons r ls]
+        [if [null? r]
+          [cons l ls]
+          [cons r [cons l ls]]]]]]]
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[define [bftf h a] [begin [displayln [format "~a:~a:~a" [fbrt-count h] [get-bits h] [fbrt-val h] ]] a]]
+[define [bftt r] #f]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-[define-strm [strm<-file filename]
-  [let [[p [open-input-file filename]]]
-    [strm-let loop [[c [read-line p]]]
-      [if [eof-object? c]
-          [begin [close-input-port p]
-                 strm-null]
-          [strm-cons c
-            [loop [read-line p]]]]]]]
+;;node insert (new nf should have wrapper that tests v= n-v)
+;;bfs basic set ops / zip 
+;;shamb
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[define [fbrt=? x y]
+  [if [and [null? x] [null? y]] #t
+    [if [and [bit-string-equal? [bit-string-pack [fbrt-bits x]] [bit-string-pack [fbrt-bits x]]]
+             [equal? [fbrt-count x] [fbrt-count y]]
+             [equal? [fbrt-aux x] [fbrt-aux y]]
+             [equal? [fbrt-val x] [fbrt-val y]]
+             [fbrt=? [fbrt-left x] [fbrt-left y]]
+             [fbrt=? [fbrt-right x] [fbrt-right y]]] #t #f]]]
 
-[define [file<-strm file pf strm]
-  [let [[o [open-output-file file #:exists 'replace]]]
-    [strm-for-each [lambda [x] [pf x o]] strm]
-    [close-output-port o]]]
+[define [rec-in t l af]
+  [if [null? l] t
+    [let [[h [car l]][hl [string-length [car l]]]]
+      [rec-in [fbrt-insert h [int->bv [if [equal? hl 0] 0 [string->number h 2]] hl] t af suvf snf] [cdr l] af]]]]
 
-[define [strm<-cmd cmd]
-  [let-values [[[in-p out-p pid err-p stat]
-                [apply values [process/ports #f #f [current-output-port] cmd ]]]]
-    [strm-let loop [[c [read-line in-p]]]
-      [if [eof-object? c]
-          [begin [close-input-port in-p]
-                 strm-null]
-          [strm-cons c
-            [loop [read-line in-p]]]]]]]
+[define [atf hb v l r] [+ [if [null? v] 0 1] [if [null? l] 0 [fbrt-count l]] [if [null? r] 0 [fbrt-count r]]]]
 
-[define-strm [strm-rxm<-file rx filename]
-  [let [[p [open-input-file filename]]]
-    [strm-let loop [[c [regexp-match rx p]]]
-      [if [equal? #f c]
-          [begin [close-input-port p] strm-null]
-          [strm-cons c [loop [regexp-match rx p]]]]]]]
+[define-inline [unit-test n r]
+  [let [[kl [sort
+              [remove-duplicates
+                [for/list [[j [in-range 0 [expt 2 n]]]]
+                  [substring [pad [random [expt 2 31]] 31 2] [* r [random 8]] [- 31 [* r [random 8]]]]]]
+              [lambda [x y] [< 0.5 [random]]]]]]
+    [displayln "made keylist"]
+    [displayln [length kl]]
+    [displayln [car kl]]
+    [list [time [rec-in [list] kl atf]] kl]]]
 
-[define [xml-elem->file x]
-  [let* [[xs [bytes->string/utf-8 [car x]]]
-         [id [cadr [regexp-match #rx"<recordid>(.*?)</recordid>" xs]]]
-         [o [open-output-file [cat "dest/" id] #:exists 'replace]]]
-    [displayln "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" o]
-    [displayln xs o]
-    [close-output-port o]
-    ]]
+[let [[mt [unit-test 6 1]]]
+  [equal? [list-lex [car mt]] [sort [cadr mt] string<?]]]
 
+[let [[mt [unit-test 6 0]]]
+  [equal? [list-lex [car mt]] [sort [cadr mt] string<?]]]
 
+[let [[mt [unit-test 12 1]]]
+  [fbrt-bfs bftf [car mt] bftt null]]
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[define [rec-mk-skew-str n s]
+  [if [equal? 0 [modulo n 2]]
+    [rec-mk-skew-str [/ n 2] [sub1 s]]
+    [bv->char-str [int->bv [/ [sub1 n] 2] [sub1 s]]]]] 
 
-[define [strm-do in-p do-re exit-re]
-  [strm-let loop [[r [regexp-match do-re in-p 0]]]
-    [if [regexp-match exit-re [car r]]
-        [begin strm-null]
-        [strm-cons [car r]
-          [loop [regexp-match do-re in-p 0]]]]]]
+[define [make-key-str-skew<? kl]
+  [lambda [x y]
+    [string<? [string-append x "1" [make-string [- [sub1 kl] [string-length x]] #\0]]
+              [string-append y "1" [make-string [- [sub1 kl] [string-length y]] #\0]]]]]
 
-[define [strm<-sqlline sys conn-str fmt q-str]
-  [let-values [[[in-p out-p pid err-p stat]
-                [apply values [process*/ports #f #f [current-output-port]
-                  "/usr/bin/java" "-Djava.ext.dirs=./" "-jar" "/usr/share/java/sqlline.jar"
-                  ]]]]
-    [let [[dore [regexp [cat "([0-9]+: " sys ":[0-9]*>|[^\n]*\n)"]]]
-          [exre [regexp [cat "[0-9]+: " sys ":[0-9]*>"]]]
-          [con-str [cat "!connect " sys conn-str]] ]
-    [file-stream-buffer-mode out-p 'line] 
-    [strm-for-each displayln [strm-do in-p #rx"(sqlline>|[^\n]*\n)" #rx"sqlline>"]]
-    [displayln con-str out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [displayln "!set incremental true " out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [displayln [cat "!outputformat " fmt] out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [displayln q-str out-p]
-    [let [[r-strm [strm-do in-p dore exre]]]
-      [displayln "!quit" out-p]
-      [flush-output out-p]
-      r-strm]]]]
+[define [sub-check pkl pks pt l]
+  [if [null? l] [void]
+    [let [[tt [rec-in [list] [car l] atf]]]
+      [if [and [fbrt=? pt tt]
+               [equal? pkl [list-lex tt]]
+               [equal? pks [list-skew tt]]]
+        [void]
+        [begin [writeln "**** FAILED ****"]
+               [writeln pkl][writeln [list-lex tt]][writeln pks][writeln [list-skew tt]]]]
+    [sub-check pkl pks pt [cdr l]]]]]
 
-[define [strm<-sqlline<-strm sys conn-str fmt q-str]
-  [let-values [[[in-p out-p pid err-p stat]
-                [apply values [process*/ports #f #f [current-output-port]
-                  "/usr/bin/java" "-Djava.ext.dirs=./" "-jar" "/usr/share/java/sqlline.jar"
-                  ]]]]
-    [let [[dore [regexp [cat "([0-9]+: " sys ":>|[^\n]*\n)"]]]
-          [exre [regexp [cat "[0-9]+: " sys ":>"]]]
-          [con-str [cat "!connect " sys conn-str]] ]
-    [file-stream-buffer-mode out-p 'line] 
-    [strm-for-each displayln [strm-do in-p #rx"(sqlline>|[^\n]*\n)" #rx"sqlline>"]]
-    [displayln con-str out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [displayln "!set incremental true " out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [displayln [cat "!outputformat " fmt] out-p]
-    [strm-for-each displayln [strm-do in-p dore exre]]
-    [let* [[r-strm [map [lambda [x] [begin [displayln x out-p] [let [[r [strm-do in-p dore exre]]] r]]] [list<-strm q-str]] ]
-           [rl [length r-strm]]]
-      [displayln rl]
-      [displayln "!quit" out-p]
-      [flush-output out-p]
-      r-strm]]]]
+[define [rec-check kl l]
+  [if [null? l] [void]
+    [let* [[llv [all-perm [car l]]]
+           [llk [map [lambda [y] [map [lambda [x] [rec-mk-skew-str x kl]] y]] llv]]]
+      [let* [[pk [car llk]]
+             [pt [rec-in [list] pk atf]]]
+        [sub-check [sort pk string<?] [sort pk [make-key-str-skew<? kl]] pt [cdr llk]]
+        [rec-check kl [cdr l]]]]]]
 
+[define [gen-test n kl]
+  [let [[l [uni-comb n [cdr [build-list [expt 2 kl] values]]]]]
+    [displayln [format "n=~a kl=~a length=~a" n kl [length l]]]
+    [time [rec-check kl l]]]]
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[for [[i [in-range 1 2]]] [gen-test i 1]] 
+[for [[i [in-range 1 4]]] [gen-test i 2]]
+[for [[i [in-range 1 8]]] [gen-test i 3]]
+[for [[i [in-range 1 5]]] [gen-test i 4]]
 
-[define [get-resp in out serv path]
-  [let-values [[[path rh] [uri&headers->path&header [cat serv path] [hash]]]]
-     [when [start-request in out "1.1" "GET" path rh] ;[display "value" out];[flush-output out]
-       [void]]
-     [let [[h [purify-port/log-debug in]]]
-       [values h [read-entity/bytes in h]]
-     ]]]
-
-[define [get-resource serv path-list]
-  [let-values [[[scheme host port] [uri->scheme&host&port serv]]]
-    [call/requests scheme host port
-      [lambda [in out]
-        [map [lambda [i] [call-with-values [lambda [] [get-resp in out serv i]]
-                                           [lambda [x y] [cons x y]]]]
-             path-list]] 
-    ]]]
-
-[define [http-path-strm->doc-strm sys pstrm]
-  [strm-concat [strm<-list [get-resource sys [list<-strm [strm-chunk 1000 pstrm]]]]]] 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-[define node->file [lambda [x]
-  [let* [[xs [bytes->string/utf-8 [car x]]]
-         [id [cadr [regexp-match #rx"<recordid>(.*?)</recordid>" xs]]]
-         [o [open-output-file [cat "dest/" id] #:exists 'replace]]]
-    [displayln "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" o]
-    [displayln xs o]
-    [close-output-port o]
-    ]]]
-
-
+; for each elem build, del, and test == elem \ t
