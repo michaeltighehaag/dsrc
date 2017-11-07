@@ -67,6 +67,8 @@
 [define [get-xml str [nsl [list]]] 
   [call-with-input-file str [lambda [in] [ssax:xml->sxml in nsl]]]]
 
+[define [sxml<-str str [nsl [list]]] [ssax:xml->sxml [open-input-string str] nsl]]
+
 [define [get-json-sxml str] 
   [call-with-input-file str [lambda [in] [json->sxml in ]]]]
 
@@ -342,11 +344,6 @@
              path-list]] 
     ]]]
 
-[define [http-path-strm->doc-strm sys pstrm]
-  [strm-concat [strm<-list [get-resource sys [list<-strm [strm-chunk 1000 pstrm]]]]]] 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 [define node->file [lambda [x]
   [let* [[xs [bytes->string/utf-8 [car x]]]
          [id [cadr [regexp-match #rx"<recordid>(.*?)</recordid>" xs]]]
@@ -355,5 +352,12 @@
     [displayln xs o]
     [close-output-port o]
     ]]]
+
+[define [test-get-res sys pl] [map [lambda [x] [cat sys x]] pl]]
+
+[define [http-GET-strm sys input-strm make-path]
+  [strm-concat [strm-map [lambda [x] [strm<-list [test-get-res sys [map make-path x]]]] [strm-map list<-strm [strm-chunk 6 input-strm]]]]]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
